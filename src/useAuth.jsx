@@ -1,115 +1,77 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { jwtDecode } from "jwt-decode";
 import Keycloak from "keycloak-js";
-import { useNavigate } from "react-router-dom";
 
-// Tạo đối tượng Keycloak
 const client = new Keycloak({
-  url: "http://localhost:8080/",
-  realm: "myrealm",
-  clientId: "myClient",
+  url: "http://192.168.0.104:8080/", // Đảm bảo url trỏ đến Keycloak server
+  realm: "myrealm", // Thay bằng realm mà bạn đã cấu hình trong Keycloak
+  clientId: "myClient", // Thay bằng clientId mà bạn đã cấu hình trong Keycloak
 });
 
 const useAuth = () => {
-  const [token, setToken] = useState(
-    localStorage.getItem("access_token") || null
-  );
-  const [refreshToken, setRefreshToken] = useState(
-    localStorage.getItem("refresh_token") || null
-  );
-  const [isLogin, setLogin] = useState(!!localStorage.getItem("access_token"));
-  const navigate = useNavigate();
+  const isRun = useRef(false);
+  const [token, setToken] = useState(null);
+  const [isLogin, setLogin] = useState(false);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    // Tự động lấy token từ localStorage khi component được render
-    const storedToken = localStorage.getItem("access_token");
-    if (storedToken) {
-      setToken(storedToken);
-      setLogin(true);
-    }
+    if (isRun.current) return;
+
+    isRun.current = true;
+
+    // Khởi tạo Keycloak
+    client
+      .init({
+        onLoad: "login-required",
+        checkLoginIframe: false, // Giảm thiểu request không cần thiết nếu không dùng iframe
+      })
+      .then((authenticated) => {
+        setLogin(authenticated);
+        setToken(client.token);
+        if (client.token) {
+          const decodedToken = jwtDecode(client.token);
+          console.log(decodedToken); // Lưu thông tin người dùng
+        }
+        // Tự động làm mới token trước khi nó hết hạn
+        const refreshTokenInterval = setInterval(() => {
+          if (client.token) {
+            client
+              .updateToken(30) // Làm mới token trước khi hết hạn 30 giây
+              .then((refreshed) => {
+                if (refreshed) {
+                  setToken(client.token); // Cập nhật token nếu làm mới thành công
+                }
+              })
+              .catch((err) => {
+                console.error("Failed to refresh token", err);
+                setError("Failed to refresh token");
+              });
+          }
+        }, 60000); // Kiểm tra mỗi phút
+
+        // Cleanup interval khi unmount
+        return () => clearInterval(refreshTokenInterval);
+      })
+      .catch((err) => {
+        console.error("Failed to initialize Keycloak", err);
+        setError("Failed to initialize Keycloak");
+      });
   }, []);
 
-  const login = async (username, password) => {
-    const body = new URLSearchParams({
-      client_id: "myClient",
-      grant_type: "password",
-      username: username,
-      password: password,
-    });
-
-    const response = await fetch(
-      "http://localhost:8080/realms/myrealm/protocol/openid-connect/token",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: body.toString(),
-      }
-    );
-
-    if (response.ok) {
-      const data = await response.json();
-      setLogin(true);
-      setToken(data.access_token);
-      setRefreshToken(data.refresh_token);
-
-      // Lưu access_token và refresh_token vào localStorage
-      localStorage.setItem("access_token", data.access_token);
-      localStorage.setItem("refresh_token", data.refresh_token);
-
-      // Điều hướng tới trang private sau khi đăng nhập thành công
-      navigate("/private");
-    } else {
-      throw new Error("Login failed");
-    }
-  };
-
   const logout = () => {
-    // Xóa token khỏi state và localStorage
-    setToken(null);
-    setRefreshToken(null);
-    setLogin(false);
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("refresh_token");
-
-    // client.logout({
-    //   redirectUri: window.location.origin,
-    // });
-    navigate("/");
+    client
+      .logout()
+      .then(() => {
+        setLogin(false);
+        setToken(null);
+      })
+      .catch((err) => {
+        console.error("Logout failed", err);
+        setError("Logout failed");
+      });
   };
 
-  const signup = async (username, password, email) => {
-    const body = {
-      username: username,
-      email: email,
-      enabled: true,
-      credentials: [{ type: "password", value: password, temporary: false }],
-    };
-
-    const response = await fetch(
-      "http://localhost:8080/admin/realms/myrealm/users",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`, // Phải là admin token để tạo user
-        },
-        body: JSON.stringify(body),
-      }
-    );
-
-    if (response.ok) {
-      // Điều hướng đến trang login sau khi đăng ký thành công
-      navigate("/login");
-    } else {
-      throw new Error("Sign Up failed");
-    }
-  };
-
-  // Phương thức lấy access_token từ localStorage
-  const getToken = () => {
-    return localStorage.getItem("access_token");
-  };
-
-  return { isLogin, token, login, logout, getToken };
+  return { isLogin, token, error, logout };
 };
 
 export default useAuth;

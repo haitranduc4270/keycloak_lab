@@ -1,21 +1,19 @@
 import React from "react";
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
-import PublicPage from "./PublicPage";
-import PrivatePage from "./PrivatePage";
-import LoginPage from "./LoginPage";
-import SignUpPage from "./SignUpPage";
+import useAuth from "./useAuth";
 
-function App() {
+const App = () => {
+  const { isLogin, token, error, logout } = useAuth(); // Lấy hàm logout từ useAuth
+
+  if (error) return <div>Error: {error}</div>;
+  if (!isLogin) return <div>Loading...</div>;
+
   return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<PublicPage />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/private" element={<PrivatePage />} />
-        <Route path="/signup" element={<SignUpPage />} />
-      </Routes>
-    </Router>
+    <div>
+      <h1>Logged in successfully!</h1>
+      <p>Token: {token}</p>
+      <button onClick={logout}>Logout</button> {/* Thêm nút Logout */}
+    </div>
   );
-}
+};
 
 export default App;
